@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import requests
 from datetime import datetime, timedelta
-from pvlib.soiling import kimber
+#from pvlib.soiling import kimber
 
 st.set_page_config(
     page_title='Soiling System Dashboard',
