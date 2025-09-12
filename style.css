@@ -1,0 +1,59 @@
+/* Fondo general de la app principal (verde suave) */
+body, .stApp {
+    background: linear-gradient(120deg, #b9fbc0 0%, #70e1a0 100%);
+}
+
+/* Títulos */
+.stApp h1, .stApp h2, .stApp h3 {
+    color: #1e293b;
+    font-family: 'Segoe UI', sans-serif;
+}
+
+/* Sidebar: fondo blanco, texto oscuro */
+section[data-testid="stSidebar"] {
+    background: #fff;
+    border-radius: 12px;
+    padding: 18px 24px 24px 24px;
+    color: #222;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+}
+section[data-testid="stSidebar"] label, 
+section[data-testid="stSidebar"] span, 
+section[data-testid="stSidebar"] div, 
+section[data-testid="stSidebar"] h1, 
+section[data-testid="stSidebar"] h2, 
+section[data-testid="stSidebar"] h3 {
+    color: #222 !important;
+}
+
+/* Contenedor principal de resultados: fondo blanco, texto negro, borde y sombra */
+div[data-testid="stVerticalBlock"] > div:first-child {
+    background: #fff;
+    border-radius: 16px;
+    padding: 32px 32px 24px 32px;
+    margin: 32px 0 32px 0;
+    color: #111;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+}
+
+/* Botones */
+.stButton>button {
+    background-color: #6366f1;
+    color: white;
+    border-radius: 8px;
+    border: none;
+    padding: 0.5em 1.5em;
+    font-weight: bold;
+    transition: background 0.2s;
+}
+.stButton>button:hover {
+    background-color: #4338ca;
+    color: #fff;
+}
+
+/* Dataframes y tablas */
+.stDataFrame, .stTable {
+    background: #fff;
+    border-radius: 8px;
+    color: #111;
+}
