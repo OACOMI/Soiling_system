@@ -5,6 +5,7 @@ import requests
 from datetime import datetime
 import os
 import base64
+from api import get_weather_events_openmeteo
 
 st.set_page_config(
     page_title='Soiling System Dashboard',
@@ -13,13 +14,14 @@ st.set_page_config(
 with open('style.css')as f:
     st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html = True)
 
+NREL_API_KEY = "K8Sa04srQoqiB1ildfRq5MiZL6O2tFm89qpPsb4G"  
+
 # --- SIDEBAR ---
 with st.sidebar:
-        # Imagen centrada en la parte superior del sidebar
+    # Logo
     img_path = os.path.join(os.path.dirname(__file__), "data", "logo_beetmann.png")
     with open(img_path, "rb") as img_file:
         img_base64 = base64.b64encode(img_file.read()).decode()
-        
     st.markdown(
         f"""
         <div style="display: flex; justify-content: center; align-items: center; margin-bottom: 1rem;">
@@ -28,21 +30,59 @@ with st.sidebar:
         """,
         unsafe_allow_html=True,
     )
-    # ...resto del sidebar...
+
     st.header("Configuración del sistema de soiling")
     system = st.selectbox(
         "Selecciona el sistema de soiling:",
-        ["SOLOs System"]
+        ["Kimber","SOLOs System"],
+        key="soiling_system_select"
     )
     st.markdown(f"**Sistema seleccionado:** {system}")
 
-    st.subheader("Ubicación para consulta de clima")
-    lat = st.number_input("Latitud", value=19.4326, format="%.4f")
-    lon = st.number_input("Longitud", value=-99.1332, format="%.4f")
-    api_key = st.text_input("API Key de OpenWeather", type="password")
+    # --- UBICACIONES DESDE EXCEL ---
+    ubicaciones_path = os.path.join(os.path.dirname(__file__), "ubi", "ubicaciones.xlsx")
+    
+    if os.path.exists(ubicaciones_path):
+        ubicaciones_df = pd.read_excel(ubicaciones_path)
+        # Limpia los nombres de columnas de espacios y caracteres invisibles
+        ubicaciones_df.columns = [col.strip() for col in ubicaciones_df.columns]
+        # Quita duplicados por proyecto
+        ubicaciones_df = ubicaciones_df.drop_duplicates(subset="Proyecto", keep="first")
+    else:
+        ubicaciones_df = pd.DataFrame(columns=["Proyecto", "Latitud", "Longitud"])
+
+    proyectos = ubicaciones_df["Proyecto"].tolist()
+    selected_proyecto = st.selectbox("Selecciona un proyecto", proyectos + ["Agregar nuevo"], key="proyecto_select")
+    
+    if selected_proyecto == "Agregar nuevo":
+        nuevo_nombre = st.text_input("Nombre del nuevo proyecto")
+        nueva_lat = st.number_input("Latitud", format="%.6f", key="nueva_lat")
+        nueva_lon = st.number_input("Longitud", format="%.6f", key="nueva_lon")
+        if st.button("Guardar nuevo proyecto"):
+            if nuevo_nombre and not ubicaciones_df["Proyecto"].eq(nuevo_nombre).any():
+                new_row = pd.DataFrame([{"Proyecto": nuevo_nombre, "Latitud": nueva_lat, "Longitud": nueva_lon}])
+                ubicaciones_df = pd.concat([ubicaciones_df, new_row], ignore_index=True)
+                ubicaciones_df.to_excel(ubicaciones_path, index=False)
+                st.success("Proyecto agregado. Recarga la página para verlo en la lista.")
+            else:
+                st.warning("El nombre del proyecto ya existe o está vacío.")
+        lat = nueva_lat
+        lon = nueva_lon
+    else:
+        # Mostrar y permitir editar la ubicación seleccionada
+        row = ubicaciones_df[ubicaciones_df["Proyecto"] == selected_proyecto].iloc[0]
+        lat = st.number_input("Latitud", value=float(row["Latitud"]), format="%.6f", key="edit_lat")
+        lon = st.number_input("Longitud", value=float(row["Longitud"]), format="%.6f", key="edit_lon")
+        if st.button("Actualizar ubicación"):
+            ubicaciones_df.loc[ubicaciones_df["Proyecto"] == selected_proyecto, ["Latitud", "Longitud"]] = [lat, lon]
+            ubicaciones_df.to_excel(ubicaciones_path, index=False)
+            st.success("Ubicación actualizada.")
+
 
     st.subheader("Carga y filtros de datos")
     uploaded_file = st.file_uploader("Selecciona tu archivo CSV", type=["csv"])
+
+    # ...resto del código sidebar y main page...
 
     # Variables para usar después
     df = None
@@ -62,21 +102,36 @@ with st.sidebar:
             df = df.dropna(subset=['Soiling Ratio'])
 
             # Consulta clima si hay API Key
-            def get_weather_events(dates, lat, lon, api_key):
-                if not api_key:
-                    return ["Sin API Key"] * len(dates)
-                url = f"https://api.openweathermap.org/data/2.5/forecast?lat={lat}&lon={lon}&appid={api_key}&units=metric"
+            def get_weather_events_openmeteo(dates, lat, lon):
+                """
+                Consulta Open-Meteo y devuelve una lista de eventos climáticos ("Lluvia" o "Normal") para cada fecha.
+                """
+                cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
+                retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
+                openmeteo = openmeteo_requests.Client(session=retry_session)
+                url = "https://api.open-meteo.com/v1/forecast"
+                params = {
+                    "latitude": lat,
+                    "longitude": lon,
+                    "hourly": "precipitation",
+                    "start_date": min(dates).strftime("%Y-%m-%d"),
+                    "end_date": max(dates).strftime("%Y-%m-%d"),
+                    "timezone": "auto"
+                }
                 try:
-                    response = requests.get(url)
-                    if response.status_code != 200:
-                        return ["Error API"] * len(dates)
-                    data = response.json()
-                    rain_by_date = {}
-                    for entry in data['list']:
-                        entry_time = datetime.utcfromtimestamp(entry['dt'])
-                        rain = entry.get('rain', {}).get('3h', 0)
-                        date_key = entry_time.date()
-                        rain_by_date[date_key] = rain_by_date.get(date_key, 0) + rain
+                    responses = openmeteo.weather_api(url, params=params)
+                    response = responses[0]
+                    hourly = response.Hourly()
+                    precip = hourly.Variables(0).ValuesAsNumpy()
+                    times = pd.date_range(
+                        start=pd.to_datetime(hourly.Time(), unit="s", utc=True),
+                        end=pd.to_datetime(hourly.TimeEnd(), unit="s", utc=True),
+                        freq=pd.Timedelta(seconds=hourly.Interval()),
+                        inclusive="left"
+                    )
+                    precip_df = pd.DataFrame({"DateTime": times, "precipitation": precip})
+                    precip_df["date"] = precip_df["DateTime"].dt.date
+                    rain_by_date = precip_df.groupby("date")["precipitation"].sum().to_dict()
                     events = []
                     for dt in dates:
                         rain = rain_by_date.get(dt.date(), 0)
@@ -85,14 +140,11 @@ with st.sidebar:
                         else:
                             events.append("Normal")
                     return events
-                except Exception:
+                except Exception as e:
                     return ["Error API"] * len(dates)
 
-            if api_key:
-                with st.spinner("Consultando clima..."):
-                    df['Clima'] = get_weather_events(df['DateTime'], lat, lon, api_key)
-            else:
-                df['Clima'] = "Sin API Key"
+            with st.spinner("Consultando clima..."):
+                df['Clima'] = get_weather_events_openmeteo(df['DateTime'], lat, lon)
 
             # Selección de rango de fechas
             min_date = df['DateTime'].min().date()
@@ -128,7 +180,7 @@ with st.sidebar:
             st.error(f"Error al leer el archivo: {e}")
 
 # --- MAIN PAGE ---
-st.title(":sun_with_face: Soiling System Dashboard")
+st.title(":🌍: Soiling System Dashboard")
 st.markdown("""
 Sube un archivo CSV con las columnas **DateTime** y **Soiling Ratio** para visualizar el ensuciamiento de tus paneles solares.
 """)
@@ -138,6 +190,36 @@ st.subheader("Ubicación seleccionada")
 st.map(pd.DataFrame({'lat': [lat], 'lon': [lon]}), zoom=8)
 st.caption(f"Coordenadas seleccionadas: lat={lat}, lon={lon}")
 
+# ...después de mostrar el mapa y las coordenadas seleccionadas...
+
+# Obtén el año de tus datos (puedes tomar el año de la primera fecha)
+if uploaded_file is not None and df is not None and not df.empty:
+    year = df['DateTime'].dt.year.min()
+    nrel_df = get_nrel_weather_events(lat, lon, NREL_API_KEY, year=str(year))
+
+    if nrel_df is not None:
+        # Convierte las columnas de fecha y hora en NREL a un datetime para cruzar
+        nrel_df['DateTime'] = pd.to_datetime(
+            nrel_df['Year'].astype(str) + '-' +
+            nrel_df['Month'].astype(str).str.zfill(2) + '-' +
+            nrel_df['Day'].astype(str).str.zfill(2) + 'T' +
+            nrel_df['Hour'].astype(str).str.zfill(2) + ':00:00'
+        )
+
+        # Redondea tus fechas al inicio de la hora para hacer el merge
+        df['DateTime_hour'] = df['DateTime'].dt.floor('H')
+        nrel_df['DateTime_hour'] = nrel_df['DateTime']
+
+        # Une los eventos de NREL a tu DataFrame principal
+        df = pd.merge(df, nrel_df[['DateTime_hour', 'Evento']], on='DateTime_hour', how='left')
+        df = df.rename(columns={'Evento': 'Evento NREL'})
+
+        # Ahora puedes mostrar el evento NREL junto con tus datos
+        st.subheader("Datos con evento climático NREL")
+        st.dataframe(df[['DateTime', 'Soiling Ratio', 'Clima', 'Evento NREL']])
+    else:
+        st.warning("No se pudo obtener información de NREL para esta ubicación.")
+        
 # Mostrar ilustración meteorológica
 def get_weather_icon(event):
     if event == "Lluvia":
