@@ -1,82 +1,58 @@
 import requests
 import pandas as pd
-from io import StringIO
-import openmeteo_requests
-import requests_cache
-from retry_requests import retry
 
-def get_nrel_solar_data(lat, lon, api_key, year="2020"):
-    url = "https://developer.nrel.gov/api/solar/nsrdb_psm3_download.csv"
+def get_weatherapi_history(lat, lon, date, api_key):
+    """
+    Consulta WeatherAPI para datos históricos de clima en una fecha y ubicación específica.
+    Devuelve un diccionario con temperatura, precipitación, nubosidad, etc.
+    """
+    url = "https://api.weatherapi.com/v1/history.json"
     params = {
-        "api_key": api_key,
-        "wkt": f"POINT({lon} {lat})",
-        "names": year,
-        "leap_day": "false",
-        "interval": "60",
-        "utc": "false",
-        "full_name": "Omar Altamirano",
-        "email": "oaltamirano.trainee@beetmann.com",
-        "affiliation": "Beetmann",
-        "mailing_list": "false",
-        "attributes": "ghi,dhi,dni,wind_speed,air_temperature,cloud_type"
+        "key": api_key,
+        "q": f"{lat},{lon}",
+        "dt": date  # formato 'YYYY-MM-DD'
     }
-    response = requests.get(url, params=params)
-    if response.status_code == 200:
-        lines = response.text.splitlines()
-        skip = 0
-        for i, line in enumerate(lines):
-            if line.startswith("Year"):
-                skip = i
-                break
-        df = pd.read_csv(StringIO('\n'.join(lines[skip:])))
+    r = requests.get(url, params=params, timeout=30)
+    if r.status_code == 200:
+        data = r.json()
+        # Ejemplo: obtener datos horarios
+        hours = data["forecast"]["forecastday"][0]["hour"]
+        df = pd.DataFrame(hours)
+        df["time"] = pd.to_datetime(df["time"])
         return df
     else:
-        print("Error:", response.status_code, response.text)
+        print("Error:", r.status_code, r.text)
         return None
 
-def get_weather_events_openmeteo(dates, lat, lon):
+def get_weatherapi_events(date_times, lat, lon, api_key):
     """
-    Consulta Open-Meteo y devuelve una lista de eventos climáticos ("Lluvia" o "Normal") para cada fecha.
+    Consulta WeatherAPI solo una vez por día y cruza los datos horarios con tu DataFrame.
+    Devuelve una lista de eventos (ejemplo: 'Lluvia', 'Despejado', etc.) por cada DateTime.
     """
-    cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
-    retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
-    openmeteo = openmeteo_requests.Client(session=retry_session)
-    url = "https://api.open-meteo.com/v1/forecast"
-    params = {
-        "latitude": lat,
-        "longitude": lon,
-        "hourly": "precipitation",
-        "start_date": min(dates).strftime("%Y-%m-%d"),
-        "end_date": max(dates).strftime("%Y-%m-%d"),
-        "timezone": "auto"
-    }
-    try:
-        responses = openmeteo.weather_api(url, params=params)
-        response = responses[0]
-        hourly = response.Hourly()
-        precip = hourly.Variables(0).ValuesAsNumpy()
-        times = pd.date_range(
-            start=pd.to_datetime(hourly.Time(), unit="s", utc=True),
-            end=pd.to_datetime(hourly.TimeEnd(), unit="s", utc=True),
-            freq=pd.Timedelta(seconds=hourly.Interval()),
-            inclusive="left"
-        )
-        precip_df = pd.DataFrame({"DateTime": times, "precipitation": precip})
-        precip_df["date"] = precip_df["DateTime"].dt.date
-        rain_by_date = precip_df.groupby("date")["precipitation"].sum().to_dict()
-        events = []
-        for dt in dates:
-            rain = rain_by_date.get(dt.date(), 0)
-            if rain > 0:
-                events.append("Lluvia")
+    eventos = []
+    fechas = sorted(set(dt.strftime("%Y-%m-%d") for dt in date_times))
+    clima_por_fecha = {}
+    for fecha in fechas:
+        df_clima = get_weatherapi_history(lat, lon, fecha, api_key)
+        clima_por_fecha[fecha] = df_clima
+
+    for dt in date_times:
+        fecha = dt.strftime("%Y-%m-%d")
+        hora = dt.hour
+        df_clima = clima_por_fecha.get(fecha)
+        if df_clima is not None:
+            clima = df_clima[df_clima["time"].dt.hour == hora]
+            if not clima.empty:
+                row = clima.iloc[0]
+                if row["precip_mm"] > 0:
+                    evento = "Lluvia"
+                elif row["cloud"] > 60:
+                    evento = "Nublado"
+                else:
+                    evento = "Despejado"
+                eventos.append(evento)
             else:
-                events.append("Normal")
-        return events
-    except Exception as e:
-        return ["Error API"] * len(dates)
-# Uso:
-api_key = "K8Sa04srQoqiB1ildfRq5MiZL6O2tFm89qpPsb4G"
-lat, lon = 19.43, -99.13  # Ejemplo: CDMX
-df = get_nrel_solar_data(lat, lon, api_key)
-if df is not None:
-    print(df.head())
+                eventos.append("Sin datos")
+        else:
+            eventos.append("Sin datos")
+    return eventos
