@@ -5,23 +5,18 @@ from datetime import datetime
 from data_manager import load_ubicaciones, save_ubicaciones, add_proyecto, update_proyecto, delete_proyecto
 from utils import get_consecutive_days_below, get_weather_icon
 from ui_components import show_kpis, show_chart
-from api import get_weatherapi_events
+from api import get_openmeteo_events
 import base64
-from dotenv import load_dotenv
-load_dotenv()
 import os
-api_key = os.getenv("WEATHER_API_KEY")
+from api import get_openmeteo_events
+from soiling_methods import apply_soiling_method, generar_recomendaciones
 
 st.set_page_config(
     page_title='Soiling System Dashboard',
     page_icon=':🌍:',
 )
-
 with open('style.css') as f:
     st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
-
-#load_dotenv(dotenv_path="key.venv")  # O ".env" si tu archivo se llama así
-#NREL_API_KEY = os.getenv("NREL_API_KEY")
 
 # --- SIDEBAR ---
 with st.sidebar:
@@ -67,7 +62,16 @@ with st.sidebar:
 
     st.subheader("Carga y filtros de datos")
     uploaded_file = st.file_uploader("Selecciona tu archivo CSV", type=["csv"])
-
+    
+    # Agregar selectbox para método de soiling
+    metodo_soiling = st.selectbox(
+        "Método de cálculo de soiling",
+        ["Sin modelo","SOMOSclean", "Kimber"],
+        help="Selecciona el método para calcular el soiling ratio"
+    )
+    
+    df = None
+    filtered_df = None
     df = None
     filtered_df = None
     min_date = None
@@ -84,7 +88,9 @@ with st.sidebar:
             df = df.sort_values('DateTime')
             df['Soiling Ratio'] = pd.to_numeric(df['Soiling Ratio'], errors='coerce')
             df = df.dropna(subset=['Soiling Ratio'])
-
+            
+            #df = apply_soiling_method(df, metodo_soiling)
+            
             # Filtrar solo horas entre 6:00 y 20:00 (8 pm)
             df['hour'] = df['DateTime'].dt.hour
             df = df[(df['hour'] >= 6) & (df['hour'] <= 20)]
@@ -92,9 +98,13 @@ with st.sidebar:
 
             df['DateTime_hour'] = df['DateTime'].dt.floor('H')
 
-            
+             
             with st.spinner("Consultando clima..."):
-                df['Clima'] = get_weatherapi_events(df['DateTime'], lat, lon, api_key)
+                df['Clima'] = get_openmeteo_events(df['DateTime'], lat, lon)
+                
+            # Aplicar método de soiling DESPUÉS de obtener clima
+            df = apply_soiling_method(df, metodo_soiling)
+            st.info(f"✓ Método {metodo_soiling} aplicado correctamente")
 
             min_date = df['DateTime'].min().date()
             max_date = df['DateTime'].max().date()
@@ -132,7 +142,8 @@ with st.sidebar:
 # --- MAIN PAGE ---
 st.title("🌍: Soiling System Dashboard")
 st.markdown("""
-Sube un archivo CSV con las columnas **DateTime** y **Soiling Ratio** para visualizar el ensuciamiento de tus paneles solares.
+Sube un archivo CSV con las columnas **DateTime** y **Soiling Ratio** para visualizar el ensuciamiento de tus paneles solares.  
+*
 """)
 
 st.subheader("Ubicación seleccionada")
@@ -149,16 +160,26 @@ if 'filtered_df' in locals() and filtered_df is not None and not filtered_df.emp
     days_below = get_consecutive_days_below(filtered_df, 'Soiling Ratio', threshold)
     if sr_avg >= threshold:
         status = ("🟢 Normal", "green")
-    elif sr_avg >= threshold - 0.05:
+    elif sr_avg >= threshold - 0.03:
         status = ("🟡 Advertencia", "orange")
     else:
         status = ("🔴 Limpieza necesaria", "red")
-
+        
     show_kpis(sr_avg, sr_loss, days_below, status)
-
+    
+    # Agregar sección de recomendaciones
+    st.subheader(f"📋 Recomendaciones basadas en {metodo_soiling}")
+    recomendaciones = generar_recomendaciones(filtered_df, metodo_soiling, threshold)
+    st.markdown(recomendaciones)
+    
     st.subheader("Clima por fecha")
     filtered_df['Clima Icono'] = filtered_df['Clima'].apply(get_weather_icon)
     st.dataframe(filtered_df[['DateTime', 'Soiling Ratio', 'Clima', 'Clima Icono']])
+    
+    # Recomendaciones de limpieza
+    st.subheader("Fechas recomendadas para limpieza")
+    clean_recommend = filtered_df[filtered_df['Soiling Ratio'] < threshold]
+    st.dataframe(clean_recommend[['DateTime', 'Soiling Ratio']])
 
 else:
     st.info("Por favor, sube un archivo CSV y selecciona los filtros en la barra lateral.")
