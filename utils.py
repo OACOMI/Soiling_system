@@ -14,6 +14,9 @@ def get_weather_icon(event):
         return "🌧️"
     elif event == "Normal":
         return "☀️"
+    elif event == "Nublado":
+        return "☁️"
+    
     elif event == "Sin API Key":
         return "❓"
     else:
