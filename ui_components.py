@@ -15,3 +15,5 @@ def show_chart(chart_data, chart_type):
         st.area_chart(chart_data.set_index('Periodo')['Soiling Ratio'], use_container_width=True)
     else:
         st.bar_chart(chart_data.set_index('Periodo')['Soiling Ratio'], use_container_width=True)
+        
+        
