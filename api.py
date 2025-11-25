@@ -1,58 +1,61 @@
 import requests
 import pandas as pd
 
-def get_weatherapi_history(lat, lon, date, api_key):
+def get_openmeteo_history(lat, lon, start_date, end_date):
     """
-    Consulta WeatherAPI para datos históricos de clima en una fecha y ubicación específica.
-    Devuelve un diccionario con temperatura, precipitación, nubosidad, etc.
+    Consulta Open-Meteo para un rango de fechas y devuelve un DataFrame con datos horarios.
     """
-    url = "https://api.weatherapi.com/v1/history.json"
+    url = "https://archive-api.open-meteo.com/v1/archive"
     params = {
-        "key": api_key,
-        "q": f"{lat},{lon}",
-        "dt": date  # formato 'YYYY-MM-DD'
+        "latitude": lat,
+        "longitude": lon,
+        "start_date": start_date,
+        "end_date": end_date,
+        "hourly": "temperature_2m,precipitation,cloudcover",
+        "timezone": "auto"
     }
     r = requests.get(url, params=params, timeout=30)
     if r.status_code == 200:
         data = r.json()
-        # Ejemplo: obtener datos horarios
-        hours = data["forecast"]["forecastday"][0]["hour"]
-        df = pd.DataFrame(hours)
+        df = pd.DataFrame({
+            "time": data["hourly"]["time"],
+            "temperature": data["hourly"]["temperature_2m"],
+            "precipitation": data["hourly"]["precipitation"],
+            "cloudcover": data["hourly"]["cloudcover"]
+        })
         df["time"] = pd.to_datetime(df["time"])
         return df
     else:
         print("Error:", r.status_code, r.text)
         return None
 
-def get_weatherapi_events(date_times, lat, lon, api_key):
+def get_openmeteo_events(date_times, lat, lon):
     """
-    Consulta WeatherAPI solo una vez por día y cruza los datos horarios con tu DataFrame.
-    Devuelve una lista de eventos (ejemplo: 'Lluvia', 'Despejado', etc.) por cada DateTime.
+    Cruza los datos horarios de Open-Meteo con las fechas/hora del CSV.
+    Devuelve una lista de eventos por cada DateTime.
     """
+    start_date = min(date_times).strftime("%Y-%m-%d")
+    end_date = max(date_times).strftime("%Y-%m-%d")
+    df_clima = get_openmeteo_history(lat, lon, start_date, end_date)
     eventos = []
-    fechas = sorted(set(dt.strftime("%Y-%m-%d") for dt in date_times))
-    clima_por_fecha = {}
-    for fecha in fechas:
-        df_clima = get_weatherapi_history(lat, lon, fecha, api_key)
-        clima_por_fecha[fecha] = df_clima
-
-    for dt in date_times:
-        fecha = dt.strftime("%Y-%m-%d")
-        hora = dt.hour
-        df_clima = clima_por_fecha.get(fecha)
-        if df_clima is not None:
-            clima = df_clima[df_clima["time"].dt.hour == hora]
+    if df_clima is not None:
+        df_clima["hour"] = df_clima["time"].dt.hour
+        df_clima["date"] = df_clima["time"].dt.date
+        for dt in date_times:
+            fecha = dt.date()
+            hora = dt.hour
+            clima = df_clima[(df_clima["date"] == fecha) & (df_clima["hour"] == hora)]
             if not clima.empty:
                 row = clima.iloc[0]
-                if row["precip_mm"] > 0:
+                if row["precipitation"] > 0:
                     evento = "Lluvia"
-                elif row["cloud"] > 60:
+                elif row["cloudcover"] > 60:
                     evento = "Nublado"
                 else:
                     evento = "Despejado"
                 eventos.append(evento)
             else:
                 eventos.append("Sin datos")
-        else:
-            eventos.append("Sin datos")
+    else:
+        eventos = ["Sin datos"] * len(date_times)
     return eventos
