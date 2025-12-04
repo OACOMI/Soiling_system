@@ -156,7 +156,6 @@ with st.sidebar:
 st.title("🌍: Soiling System Dashboard")
 st.markdown("""
 Sube un archivo CSV con las columnas **DateTime** y **Soiling Ratio** para visualizar el ensuciamiento de tus paneles solares.  
-*
 """)
 
 st.subheader("Ubicación seleccionada")
