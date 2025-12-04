@@ -103,7 +103,7 @@ section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label span {
   --shadow: rgba(0,0,0,0.08);
 }
 
-/* Tema oscuro detectado     por prefer-color-scheme */
+/* Tema oscuro detectado por prefer-color-scheme */
 @media (prefers-color-scheme: dark) {
   :root {
     --bg-app: linear-gradient(120deg, #4ebc59 0%, #3eb871 100%); /* más sobrio */
@@ -233,10 +233,6 @@ section[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label span {
   div[data-testid="stVerticalBlock"] > div:first-child { padding: 16px; margin: 20px 0; }
 }
 
-/* ...existing code... */
-
-/* ...existing code... */
-
 /* Quitar caja/panel alrededor del logo en el sidebar */
 section[data-testid="stSidebar"] .element-container:first-child,
 section[data-testid="stSidebar"] .stMarkdown:first-child {
@@ -310,4 +306,3 @@ div[data-testid="stVerticalBlock"] > div:first-child,
     max-width: 100% !important;
 }
 
-/* ...existing code... */
