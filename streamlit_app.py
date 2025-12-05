@@ -156,6 +156,7 @@ with st.sidebar:
 st.title("🌍: Soiling System Dashboard")
 st.markdown("""
 Sube un archivo CSV con las columnas **DateTime** y **Soiling Ratio** para visualizar el ensuciamiento de tus paneles solares.  
+*
 """)
 
 st.subheader("Ubicación seleccionada")
@@ -380,4 +381,5 @@ if 'filtered_df' in locals() and filtered_df is not None and not filtered_df.emp
 
 else:
     st.info("Por favor, sube un archivo CSV y selecciona los filtros en la barra lateral.")
+
 
